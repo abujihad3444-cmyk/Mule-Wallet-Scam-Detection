@@ -1,4 +1,6 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import pandas as pd
 import networkx as nx
 import plotly.graph_objects as go
@@ -30,6 +32,30 @@ st.title("🛡️ Mule Wallet Detection")
 st.subheader("Graph-Based Multi-Hop Mule Wallet & Scam Detection System")
 st.caption("Synthetic MFS fraud-intelligence prototype: Graph + ML + Explainable Risk + Optional GenAI")
 st.warning("Synthetic demonstration only. Risk scores are prioritization signals, not a fraud verdict or probability.")
+st.markdown("### 🎯 Who is this for?")
+u1, u2, u3 = st.columns(3)
+
+with u1:
+    st.markdown("**TARGET USER**")
+    st.write("MFS Fraud & Risk Analysts")
+
+with u2:
+    st.markdown("**PROBLEM**")
+    st.write(
+        "Suspicious activity can move across multiple connected wallets, "
+        "making isolated-wallet rules difficult to investigate."
+    )
+
+with u3:
+    st.markdown("**SOLUTION**")
+    st.write(
+        "Graph-based intelligence that detects suspicious money flows, "
+        "prioritizes risky wallets, and supports analyst investigation."
+    )
+
+st.info(
+    "🔎 Workflow: Detect → Trace → Explain → Investigate → Human Review"
+)
 
 # --------------------------- sidebar -------------------------
 st.sidebar.header("Controls")
@@ -66,15 +92,72 @@ k[3].metric("Critical", critical)
 k[4].metric("Multi-Hop Paths", len(multi_hop))
 k[5].metric("Rapid Paths", rapid_count)
 
+st.markdown("### 🎯 Quick Demo")
+
+if st.button("🎯 Demo Scam Scenario", type="primary"):
+    demo_chain = "W001 → W005 → W012 → W019 → W027"
+    st.session_state["demo_scenario"] = True
+
+    st.success(f"Suspicious multi-hop chain detected: **{demo_chain}**")
+
+    st.markdown("### 🔎 What Happened?")
+    st.write(
+        "Funds moved through a sequence of connected wallets across multiple hops, "
+        "forming a suspicious multi-hop transaction chain."
+    )
+
+    st.markdown("### ⚠️ Why Is It Risky?")
+    st.write(
+        "The chain shows repeated onward transfers, high pass-through behavior, "
+        "rapid movement of funds, and strong wallet-to-wallet linkage."
+    )
+
+    st.markdown("### ✅ What Should Happen Next?")
+    st.write(
+        "Flag the chain for analyst review, inspect linked wallets, and verify "
+        "transaction chronology and supporting account context."
+    )
+
+    st.info(
+        "Synthetic demonstration scenario. Risk score is a prioritization signal, "
+        "not a fraud verdict."
+    )
+if st.button("🤖 Analyze Demo Chain with AI"):
+   st.session_state["analyze_demo"] = True
+
 # --------------------------- demo evidence --------------------
+
 if not multi_hop.empty:
-    strongest = multi_hop.sort_values("path_score", ascending=False).iloc[0]
+
+    if st.session_state.get("demo_scenario", False):
+        demo_matches = multi_hop[
+            multi_hop["path"] == "W001 → W005 → W012 → W019 → W027"
+        ]
+
+        if not demo_matches.empty:
+            strongest = demo_matches.iloc[0]
+        else:
+            strongest = multi_hop.sort_values(
+                "path_score", ascending=False
+            ).iloc[0]
+
+    else:
+        strongest = multi_hop.sort_values(
+            "path_score", ascending=False
+        ).iloc[0]
+
     d1, d2, d3, d4 = st.columns(4)
+
     d1.metric("Strongest Path Score", f"{strongest['path_score']:.1f}/100")
     d2.metric("Hops", int(strongest["hops"]))
     d3.metric("Time Span", f"{strongest['time_span']:g}")
     d4.metric("Retention", f"{strongest['amount_retention_ratio']:.0%}")
-    st.info(f"**Highest-evidence temporal path:** {strongest['path']}  |  Pattern: {strongest['pattern']}  |  Transactions: {strongest['transaction_ids']}")
+
+    st.info(
+        f"**Highest-evidence temporal path:** {strongest['path']} | "
+        f"Pattern: {strongest['pattern']} | "
+        f"Transactions: {strongest['transaction_ids']}"
+    )
 
 # --------------------------- helpers --------------------------
 def graph_figure(selected_wallet=None):
@@ -222,17 +305,51 @@ with t4:
 
 with t5:
     st.subheader("🤖 AI Investigation Assistant")
-    st.write("The assistant uses structured evidence only. Without an API key, it returns a deterministic evidence-based explanation.")
-    ai_wallet = st.selectbox("Wallet", risk.sort_values("risk_score", ascending=False)["wallet"].tolist(), key="ai_wallet")
+
+    st.write(
+        "The assistant uses structured evidence only. "
+        "Without an API key, it returns a deterministic evidence-based explanation."
+    )
+
+    ai_wallet = st.selectbox(
+        "Wallet",
+        risk.sort_values("risk_score", ascending=False)["wallet"].tolist(),
+        key="ai_wallet"
+    )
+
     language = st.selectbox("Language", ["English", "বাংলা"])
-    if st.button("Generate Investigation", type="primary"):
+
+    analyze_demo = st.session_state.pop("analyze_demo", False)
+
+    if st.button("Generate Investigation", type="primary") or analyze_demo:
+
+        if analyze_demo:
+            ai_wallet = "W012"
+
         row = risk.loc[risk["wallet"] == ai_wallet].iloc[0]
-        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+
         if api_key:
             try:
-                from openai import OpenAI
-                client = OpenAI(api_key=api_key)
-                paths = multi_hop[(multi_hop["source"] == ai_wallet) | (multi_hop["destination"] == ai_wallet)].head(10) if not multi_hop.empty else multi_hop
+                from google import genai
+
+                client = genai.Client(api_key=api_key)
+
+                if analyze_demo:
+                    paths = multi_hop[
+                        multi_hop["path"]
+                        == "W001 → W005 → W012 → W019 → W027"
+                    ]
+                else:
+                    paths = (
+                        multi_hop[
+                            (multi_hop["source"] == ai_wallet)
+                            | (multi_hop["destination"] == ai_wallet)
+                        ].head(10)
+                        if not multi_hop.empty
+                        else multi_hop
+                    )
+
                 evidence = {
                     "wallet": ai_wallet,
                     "risk_score": float(row["risk_score"]),
@@ -245,28 +362,81 @@ with t5:
                     "unique_senders": int(row["unique_senders"]),
                     "cycle_member": bool(row["cycle_member"]),
                     "rapid_transfer_ratio": float(row["rapid_transfer_ratio"]),
-                    "paths": paths[["path","hops","transaction_ids","total_amount","time_span","rapid_transfer"]].to_dict("records") if not paths.empty else [],
+                    "paths": (
+                        paths[
+                            [
+                                "path",
+                                "hops",
+                                "transaction_ids",
+                                "total_amount",
+                                "time_span",
+                                "rapid_transfer"
+                            ]
+                        ].to_dict("records")
+                        if not paths.empty
+                        else []
+                    ),
                 }
-                instruction = "বাংলায় লিখুন।" if language == "বাংলা" else "Write in English."
-                prompt = ("You are a financial-fraud investigation assistant. Use ONLY the evidence below. "
-                          "Do not invent facts, transactions, amounts, times, probabilities, legal conclusions, or motives. "
-                          "Use cautious language such as potential indicator and requires review. " + instruction + "\n\n" + str(evidence) +
-                          "\n\nReturn: Investigation Summary; Key Indicators; Transaction Flow; Recommended Review Steps.")
-                response = client.responses.create(model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"), input=prompt)
-                output = getattr(response, "output_text", "").strip()
+
+                instruction = (
+                    "বাংলায় লিখুন।"
+                    if language == "বাংলা"
+                    else "Write in English."
+                )
+
+                prompt = (
+                    "You are a financial-fraud investigation assistant. "
+                    "Use ONLY the evidence below. "
+                    "Do not invent facts, transactions, amounts, times, "
+                    "probabilities, legal conclusions, or motives. "
+                    "Use cautious language such as potential indicator "
+                    "and requires review. "
+                    + instruction
+                    + "\n\n"
+                    + str(evidence)
+                    + "\n\n"
+                    "Return: Investigation Summary; Key Indicators; "
+                    "Transaction Flow; Recommended Review Steps."
+                )
+
+                response = client.models.generate_content(
+                    model=os.getenv(
+                        "GEMINI_MODEL",
+                        "gemini-3.5-flash-lite"
+                    ),
+                    contents=prompt
+                )
+
+                output = (response.text or "").strip()
+
                 if output:
                     st.markdown(output)
                 else:
                     st.markdown(investigation(ai_wallet))
+
             except Exception as exc:
-                st.warning(f"LLM unavailable; deterministic fallback used. {exc}")
+                st.warning(
+                    f"LLM unavailable; deterministic fallback used. {exc}"
+                )
                 st.markdown(investigation(ai_wallet))
+
         else:
             text = investigation(ai_wallet)
-            if language == "বাংলা":
-                text = text.replace("Investigation Summary", "তদন্ত সারাংশ").replace("Indicators", "প্রধান নির্দেশক")
-            st.markdown(text)
-    st.caption("Optional LLM: set OPENAI_API_KEY. Otherwise the application remains fully functional.")
 
+            if language == "বাংলা":
+                text = text.replace(
+                    "Investigation Summary",
+                    "তদন্ত সারাংশ"
+                ).replace(
+                    "Indicators",
+                    "প্রধান নির্দেশক"
+                )
+
+            st.markdown(text)
+
+    st.caption(
+        "Optional LLM: set GEMINI_API_KEY. "
+        "Otherwise the application remains fully functional."
+    )
 st.divider()
 st.caption("Mule Wallet Detection | Hackathon Prototype | Synthetic MFS Transaction Data")
